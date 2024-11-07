@@ -96,7 +96,23 @@ OSStatus playbackCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFl
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord
                                      withOptions:0
                                            error:&error];
-    [[AVAudioSession sharedInstance] setPreferredIOBufferDuration:[AVAudioSession sharedInstance].IOBufferDuration error:&error];
+
+    auto preferred_buffer_duration = 256 / [AVAudioSession sharedInstance].sampleRate;
+    NSLog(@"Requested IOBufferDuration: %f", preferred_buffer_duration);
+    
+    if (![[AVAudioSession sharedInstance] setPreferredIOBufferDuration:preferred_buffer_duration error:&error]) {
+        NSLog(@"Failed to set preferred buffer size");
+    }
+    
+    [[AVAudioSession sharedInstance] setActive:true error:&error];
+
+    if (error) {
+        NSLog(@"AVAudioSession error: %@", error);
+    }
+    
+    auto io_buffer_duration = [AVAudioSession sharedInstance].IOBufferDuration;
+    NSLog(@"Actual IOBufferDuration: %f", io_buffer_duration);
+    
     return noErr;
 }
 
@@ -181,7 +197,6 @@ OSStatus playbackCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFl
     
     NSLog(@"hardware sample rate: %f", [AVAudioSession sharedInstance].sampleRate);
     
-    NSError *error = nil;
     auto system_buffer_size = std::ceil([AVAudioSession sharedInstance].IOBufferDuration * [AVAudioSession sharedInstance].sampleRate);
     NSLog(@"hardware buffer size: %f", system_buffer_size);
 }
@@ -206,6 +221,7 @@ static unsigned recordCount=0;
 static unsigned playbackCount=0;
 static float sinTime = 0.0;
 static bool sinEnabled = false;
+static bool mutesOutput = false; // set to true to observe issue without headset
 static std::vector<std::set<UInt32>> frameCounts(2);
 
 OSStatus recordCallback(void *inRef,
@@ -256,11 +272,17 @@ OSStatus playbackCallback(void *inRef,
         }
         
         auto micSample = buffer->pop_front();
-        left[i] += (SInt32) micSample;
+        if (mutesOutput) {
+            left[i] = 0.0;
+        } else {
+            left[i] += (SInt32) micSample;
+        }
     }
     
     playbackCount++;
     if (playbackCount % 500 == 0) {
+        auto system_buffer_size = std::ceil([AVAudioSession sharedInstance].IOBufferDuration * [AVAudioSession sharedInstance].sampleRate);
+        NSLog(@"hardware buffer size: %f", system_buffer_size);
         // callback rates are equal
         NSLog(@"playbackCount: %d recordCount: %d", playbackCount, recordCount);
     }
